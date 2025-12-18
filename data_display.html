@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NRSE企业数据管理系统</title>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 新增：PapaParse 用于解析 CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Lucide图标组件保持不变
+        const Search = () => (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+        );
+
+        const Filter = () => (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+        );
+
+        const Upload = () => (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+        );
+
+        const Download = () => (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+        );
+
+        const NRSEDataTable = () => {
+            const [data, setData] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [filterStage, setFilterStage] = useState('全部');
+            const [currentPage, setCurrentPage] = useState(1);
+            const itemsPerPage = 20;
+
+            // 处理文件上传 (已修改支持 CSV)
+            const handleFileUpload = async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                setLoading(true);
+                setError(null);
+
+                try {
+                    // 判断文件类型
+                    if (file.name.toLowerCase().endsWith('.csv')) {
+                        // === CSV 处理逻辑 ===
+                        Papa.parse(file, {
+                            header: true, // 使用第一行作为字段名
+                            skipEmptyLines: true,
+                            complete: (results) => {
+                                if (results.errors.length > 0) {
+                                    setError('CSV解析错误: ' + results.errors[0].message);
+                                    setLoading(false);
+                                    return;
+                                }
+
+                                // CSV 解析出来的值默认都是字符串，需要将数值字段转回数字
+                                const processedData = results.data.map((item, index) => ({
+                                    ...item,
+                                    // 如果没有ID，临时生成一个，防止React报错
+                                    id: item.id ? parseInt(item.id) : index,
+                                    // 确保数值字段是 Float 类型
+                                    revenue_2023: parseFloat(item.revenue_2023) || 0,
+                                    domestic_market_share: parseFloat(item.domestic_market_share) || 0,
+                                    r_and_d_ratio: parseFloat(item.r_and_d_ratio) || 0,
+                                    // 处理可能缺失的字符串字段
+                                    enterprise_name: item.enterprise_name || '',
+                                    main_products: item.main_products || '',
+                                    chain_stage: item.chain_stage || '',
+                                    core_customers: item.core_customers || '',
+                                    sensitivity_level: item.sensitivity_level || '低'
+                                }));
+
+                                setData(processedData);
+                                setLoading(false);
+                            },
+                            error: (err) => {
+                                setError('CSV读取失败: ' + err.message);
+                                setLoading(false);
+                            }
+                        });
+                    } else {
+                        // === JSON 处理逻辑 (保持原有) ===
+                        const text = await file.text();
+                        const jsonData = JSON.parse(text);
+
+                        if (Array.isArray(jsonData)) {
+                            setData(jsonData);
+                        } else if (jsonData.data && Array.isArray(jsonData.data)) {
+                            setData(jsonData.data);
+                        } else {
+                            throw new Error('JSON格式不正确');
+                        }
+                        setLoading(false);
+                    }
+                } catch (err) {
+                    setError('文件解析失败: ' + err.message);
+                    setLoading(false);
+                }
+            };
+
+            // 导出数据
+            const handleExport = () => {
+                const dataStr = JSON.stringify(filteredData, null, 2);
+                const dataBlob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
+                const url = URL.createObjectURL(dataBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'nrse_data_export.json';
+                link.click();
+                URL.revokeObjectURL(url);
+            };
+
+            // 获取产业链阶段列表
+            const stages = ['全部', ...new Set(data.map(item => item.chain_stage).filter(Boolean))];
+
+            // 过滤数据
+            const filteredData = data.filter(item => {
+                const name = item.enterprise_name ? item.enterprise_name.toLowerCase() : '';
+                const products = item.main_products ? item.main_products.toLowerCase() : '';
+
+                const matchesSearch = name.includes(searchTerm.toLowerCase()) ||
+                                     products.includes(searchTerm.toLowerCase());
+                const matchesStage = filterStage === '全部' || item.chain_stage === filterStage;
+                return matchesSearch && matchesStage;
+            });
+
+            // 分页
+            const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const paginatedData = filteredData.slice(startIndex, startIndex + itemsPerPage);
+
+            useEffect(() => {
+                setCurrentPage(1);
+            }, [searchTerm, filterStage]);
+
+            // 敏感度标签颜色
+            const getSensitivityColor = (level) => {
+                switch(level) {
+                    case '高': return 'bg-red-100 text-red-800';
+                    case '中': return 'bg-yellow-100 text-yellow-800';
+                    case '低': return 'bg-green-100 text-green-800';
+                    default: return 'bg-gray-100 text-gray-800';
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 p-6">
+                    <div className="max-w-7xl mx-auto">
+                        {/* 头部 */}
+                        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-900">NRSE企业数据管理系统</h1>
+                                    <p className="text-gray-600 mt-1">新能源与半导体企业数据展示</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm text-gray-600">总计：</span>
+                                    <span className="text-2xl font-bold text-blue-600">{data.length}</span>
+                                    <span className="text-sm text-gray-600">家企业</span>
+                                </div>
+                            </div>
+
+                            {/* 文件上传 */}
+                            {data.length === 0 && (
+                                <div className="mb-4 p-8 bg-blue-50 border-2 border-dashed border-blue-300 rounded-lg text-center">
+                                    <div className="flex justify-center mb-3">
+                                        <Upload />
+                                    </div>
+                                    <p className="text-sm text-gray-600 mb-3">请上传 JSON 或 CSV 文件以加载数据</p>
+                                    <label className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
+                                        <input
+                                            type="file"
+                                            accept=".json, .csv"
+                                            onChange={handleFileUpload}
+                                            className="hidden"
+                                        />
+                                        选择文件
+                                    </label>
+                                    <p className="text-xs text-gray-400 mt-2">支持 .json 格式 或 标准UTF-8编码的 .csv</p>
+                                </div>
+                            )}
+
+                            {/* 加载和错误状态 */}
+                            {loading && (
+                                <div className="mb-4 p-4 bg-yellow-50 text-yellow-800 rounded-lg text-center">
+                                    正在解析数据...
+                                </div>
+                            )}
+                            {error && (
+                                <div className="mb-4 p-4 bg-red-50 text-red-800 rounded-lg">
+                                    {error}
+                                </div>
+                            )}
+
+                            {/* 搜索和筛选 */}
+                            {data.length > 0 && (
+                                <div className="flex gap-4">
+                                    <div className="flex-1 relative">
+                                        <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                            <Search />
+                                        </div>
+                                        <input
+                                            type="text"
+                                            placeholder="搜索企业名称或产品..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    <div className="relative">
+                                        <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                            <Filter />
+                                        </div>
+                                        <select
+                                            value={filterStage}
+                                            onChange={(e) => setFilterStage(e.target.value)}
+                                            className="pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white"
+                                        >
+                                            {stages.map(stage => (
+                                                <option key={stage} value={stage}>{stage}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <label className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 cursor-pointer">
+                                        <Upload />
+                                        重新上传
+                                        <input
+                                            type="file"
+                                            accept=".json, .csv"
+                                            onChange={handleFileUpload}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                    <button onClick={handleExport} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                                        <Download />
+                                        导出JSON
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 表格 */}
+                        {data.length > 0 && (
+                            <>
+                                <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead className="bg-gray-50 border-b border-gray-200">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">企业信息</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">产业链阶段</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">主要产品</th>
+                                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">2023营收(亿)</th>
+                                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">市场份额(%)</th>
+                                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">研发占比(%)</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">核心客户</th>
+                                                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">敏感度</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-gray-200">
+                                                {paginatedData.map((item, index) => (
+                                                    <tr key={item.id || index} className="hover:bg-gray-50 transition-colors">
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="flex flex-col">
+                                                                <div className="text-sm font-medium text-gray-900">{item.enterprise_name}</div>
+                                                                <div className="text-xs text-gray-500">{item.enterprise_id}</div>
+                                                                <div className="text-xs text-gray-400 mt-1">{item.headquarters}</div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                                {item.chain_stage}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="text-sm text-gray-900 max-w-xs">{item.main_products}</div>
+                                                            <div className="text-xs text-gray-500 mt-1 max-w-xs truncate">技术: {item.key_technologies}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                                                            <span className="text-sm font-semibold text-gray-900">{typeof item.revenue_2023 === 'number' ? item.revenue_2023.toFixed(2) : '0.00'}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                                                            <span className="text-sm text-gray-900">{typeof item.domestic_market_share === 'number' ? item.domestic_market_share.toFixed(2) : '0.00'}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                                                            <span className="text-sm text-gray-900">{typeof item.r_and_d_ratio === 'number' ? item.r_and_d_ratio.toFixed(2) : '0.00'}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="text-sm text-gray-900 max-w-xs">
+                                                                {item.core_customers ? (
+                                                                    <>
+                                                                    {item.core_customers.split(',').slice(0, 2).join(', ')}
+                                                                    {item.core_customers.split(',').length > 2 && '...'}
+                                                                    </>
+                                                                ) : '-'}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getSensitivityColor(item.sensitivity_level)}`}>
+                                                                {item.sensitivity_level}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {paginatedData.length === 0 && (
+                                        <div className="text-center py-12">
+                                            <p className="text-gray-500">没有找到匹配的数据</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* 分页 */}
+                                {totalPages > 1 && (
+                                    <div className="mt-4 flex items-center justify-between bg-white rounded-lg shadow-sm p-4">
+                                        <div className="text-sm text-gray-600">
+                                            显示第 {startIndex + 1} - {Math.min(startIndex + itemsPerPage, filteredData.length)} 条，共 {filteredData.length} 条记录
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                                                disabled={currentPage === 1}
+                                                className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                上一页
+                                            </button>
+                                            <div className="flex gap-1">
+                                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                                    let pageNum;
+                                                    if (totalPages <= 5) {
+                                                        pageNum = i + 1;
+                                                    } else if (currentPage <= 3) {
+                                                        pageNum = i + 1;
+                                                    } else if (currentPage >= totalPages - 2) {
+                                                        pageNum = totalPages - 4 + i;
+                                                    } else {
+                                                        pageNum = currentPage - 2 + i;
+                                                    }
+                                                    return (
+                                                        <button
+                                                            key={pageNum}
+                                                            onClick={() => setCurrentPage(pageNum)}
+                                                            className={`px-3 py-1 border rounded ${
+                                                                currentPage === pageNum
+                                                                    ? 'bg-blue-600 text-white border-blue-600'
+                                                                    : 'border-gray-300 hover:bg-gray-50'
+                                                            }`}
+                                                        >
+                                                            {pageNum}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <button
+                                                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                                                disabled={currentPage === totalPages}
+                                                className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                下一页
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        )}
+
+                        {/* 底部 */}
+                        {data.length > 0 && (
+                            <div className="mt-6 bg-white rounded-lg shadow-sm p-4">
+                                <div className="flex items-center justify-between text-sm text-gray-600">
+                                    <div>数据来源：公开招投标数据、行业白皮书 | Schema: NRSE | 方法: Rule-based + Statistical Hybrid</div>
+                                    <div>总计 {data.length} 家企业</div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<NRSEDataTable />, document.getElementById('root'));
+    </script>
+</body>
+</html>

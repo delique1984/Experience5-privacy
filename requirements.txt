@@ -1,0 +1,9 @@
+Flask
+Flask-SQLAlchemy>=3.0
+marshmallow
+pymysql
+Faker
+gunicorn
+pandas
+SQLAlchemy
+numpy

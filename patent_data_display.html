@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>专利数据管理 - CRUD</title>
+    <style>
+        /* 基础样式 */
+        body { font-family: Arial, sans-serif; margin: 20px; color: #333; background-color: #f4f7f6; }
+        .container { max-width: 1300px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+        h1, h3 { color: #007bff; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 0;}
+
+        /* 控件区 */
+        .controls, .single-search, .action-bar { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; display: flex; flex-wrap: wrap; align-items: center; }
+        .controls > *, .single-search > * { margin-right: 15px; margin-bottom: 10px; }
+        .action-bar { justify-content: flex-end; border: none; padding: 0;}
+
+        /* 按钮 */
+        button { padding: 8px 15px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; transition: background-color 0.3s; }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-primary:hover:not(:disabled) { background-color: #0056b3; }
+        .btn-danger { background-color: #dc3545; color: white; }
+        .btn-danger:hover:not(:disabled) { background-color: #c82333; }
+        .btn-warning { background-color: #ffc107; color: #212529; }
+        .btn-warning:hover:not(:disabled) { background-color: #e0a800; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* 表格 */
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background-color: white; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #e9ecef; color: #495057; }
+        th[data-sort-by] { cursor: pointer; }
+        th[data-sort-by]:hover { background-color: #dee2e6; }
+
+        /* 分页 */
+        .pagination { margin-top: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .error { color: red; font-weight: bold; }
+        #singleResult { margin-top: 10px; padding: 10px; border: 1px dashed #007bff; background-color: #e7f3ff; border-radius: 5px; }
+
+        /* 模态框样式 */
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
+            overflow: auto; background-color: rgba(0,0,0,0.4); justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background-color: #fefefe; margin: auto; padding: 20px; border: 1px solid #888; width: 80%;
+            max-width: 700px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+        .close-btn:hover, .close-btn:focus { color: #000; text-decoration: none; cursor: pointer; }
+        .modal-content form label { display: block; margin-top: 10px; font-weight: bold; }
+        .modal-content form input, .modal-content form textarea { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        .form-row { display: flex; flex-wrap: wrap; justify-content: space-between; }
+        .form-row > div { flex: 1 1 45%; margin-right: 10px; }
+        .form-actions { margin-top: 20px; text-align: right; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>专利数据管理</h1>
+
+    <!-- 顶栏操作区 -->
+    <div class="action-bar">
+        <button class="btn-primary" onclick="openModalForCreate()">+ 新增专利</button>
+    </div>
+
+    <!-- 按ID查询 -->
+    <div class="single-search">
+        <h3>按 ID 精确查询</h3>
+        <label for="patentId">专利 ID:</label>
+        <input type="number" id="patentId" placeholder="输入专利ID">
+        <button class="btn-primary" onclick="searchById()">查询</button>
+        <div id="singleResult" style="display: none;"></div>
+    </div>
+
+    <!-- 列表筛选 -->
+    <div class="controls">
+        <h3>列表筛选与搜索</h3>
+        <label for="pubNum">公告号 (模糊):</label>
+        <input type="text" id="pubNum" placeholder="CN123456">
+
+        <label for="region">地区 (精确):</label>
+        <input type="text" id="region" placeholder="中国">
+
+        <label for="perPage">每页显示:</label>
+        <select id="perPage">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+        </select>
+
+        <button class="btn-primary" onclick="searchData()">搜索/刷新列表</button>
+    </div>
+
+    <p id="loadingMessage">正在加载数据...</p>
+    <p id="errorMessage" class="error" style="display: none;"></p>
+
+    <table id="patentTable" style="display: none;">
+        <thead>
+            <tr>
+                <th data-sort-by="id">ID</th>
+                <th data-sort-by="publication_number">公告号</th>
+                <th>标题</th>
+                <th data-sort-by="grant_date">授权日</th>
+                <th>地区</th>
+                <th>当前申请人</th>
+                <th>操作</th> <!-- 新增操作列 -->
+            </tr>
+        </thead>
+        <tbody id="patentBody">
+            <!-- 数据将插入到这里 -->
+        </tbody>
+    </table>
+
+    <div class="pagination">
+        <div id="metaInfo"></div>
+        <div>
+            <button class="btn-primary" id="prevBtn" onclick="changePage(-1)" disabled>上一页</button>
+            <button class="btn-primary" id="nextBtn" onclick="changePage(1)" disabled>下一页</button>
+        </div>
+    </div>
+</div>
+
+<!-- 新增：创建/修改专利模态框 -->
+<div id="patentModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" onclick="closeModal()">&times;</span>
+        <h3 id="modalTitle">新增专利</h3>
+        <form id="patentForm">
+            <input type="hidden" id="patent_id" name="id">
+            <input type="hidden" id="formMethod" value="POST">
+
+            <div class="form-row">
+                <div>
+                    <label for="modal_publication_number">公告号*:</label>
+                    <input type="text" id="modal_publication_number" name="publication_number" required>
+                </div>
+                <div>
+                    <label for="modal_grant_date">授权日 (YYYY-MM-DD):</label>
+                    <input type="date" id="modal_grant_date" name="grant_date">
+                </div>
+            </div>
+
+            <label for="modal_title">标题*:</label>
+            <input type="text" id="modal_title" name="title" required>
+
+            <label for="modal_abstract">摘要*:</label>
+            <textarea id="modal_abstract" name="abstract" rows="3" required></textarea>
+
+            <div class="form-row">
+                <div>
+                    <label for="modal_current_applicant">当前申请人:</label>
+                    <input type="text" id="modal_current_applicant" name="current_applicant">
+                </div>
+                <div>
+                    <label for="region">地区:</label>
+                    <input type="text" id="modal_region" name="region">
+                </div>
+            </div>
+
+            <!-- 更多字段为了简洁可以省略或放入高级设置 -->
+
+            <div class="form-actions">
+                <button type="button" class="btn-primary" onclick="submitModalForm()">保存</button>
+                <button type="button" class="btn-danger" onclick="closeModal()">取消</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // 确保这里的 URL 与您的后端服务地址和蓝图前缀匹配
+    const BASE_URL = "http://127.0.0.1:5000/api/v1/patents";
+
+    let currentPage = 1;
+    let currentSortBy = 'id';
+    let currentSortDir = 'desc';
+
+    // ==================== 核心数据获取与渲染 (列表) ====================
+
+    async function fetchAndRenderData() {
+        // ... (保持不变) ...
+        document.getElementById('loadingMessage').style.display = 'block';
+        document.getElementById('errorMessage').style.display = 'none';
+        document.getElementById('patentTable').style.display = 'none';
+
+        const pubNum = document.getElementById('pubNum').value;
+        const region = document.getElementById('region').value;
+        const perPage = document.getElementById('perPage').value;
+
+        const params = new URLSearchParams({
+            page: currentPage,
+            per_page: perPage,
+            sort_by: currentSortBy,
+            sort_dir: currentSortDir
+        });
+
+        if (pubNum) params.append('publication_number', pubNum);
+        if (region) params.append('region', region);
+
+        const url = `${BASE_URL}?${params.toString()}`;
+
+        try {
+            const response = await fetch(url);
+            const result = await response.json();
+
+            if (result.code === 0) {
+                renderTable(result.data);
+                renderPagination(result.meta);
+                updateSortIndicators();
+                document.getElementById('patentTable').style.display = 'table';
+            } else {
+                displayError(`API 错误: ${result.message}`);
+            }
+
+        } catch (error) {
+            displayError(`网络请求失败: ${error.message}. 请检查后端服务是否运行，并已配置CORS。`);
+        } finally {
+            document.getElementById('loadingMessage').style.display = 'none';
+        }
+    }
+
+    function renderTable(data) {
+        const tbody = document.getElementById('patentBody');
+        tbody.innerHTML = '';
+
+        if (data.length === 0) {
+            // 注意这里现在是 7 列
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">未找到匹配的专利数据。</td></tr>';
+            return;
+        }
+
+        data.forEach(patent => {
+            const row = tbody.insertRow();
+            row.insertCell().textContent = patent.id;
+            row.insertCell().textContent = patent.publication_number || 'N/A';
+            row.insertCell().textContent = patent.title ? patent.title.substring(0, 50) + '...' : 'N/A';
+            row.insertCell().textContent = patent.grant_date || 'N/A';
+            row.insertCell().textContent = patent.region || 'N/A';
+            row.insertCell().textContent = patent.current_applicant || 'N/A';
+
+            // 新增操作按钮
+            const actionsCell = row.insertCell();
+            actionsCell.innerHTML = `
+                <button class="btn-warning" onclick="openModalForUpdate(${patent.id})">编辑</button>
+                <button class="btn-danger" onclick="deletePatent(${patent.id}, '${patent.publication_number}')">删除</button>
+            `;
+        });
+    }
+
+    function renderPagination(meta) {
+        // ... (保持不变) ...
+        const metaInfo = document.getElementById('metaInfo');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const totalPages = Math.ceil(meta.total / meta.per_page);
+
+        metaInfo.textContent = `总共 ${meta.total} 条记录，第 ${meta.page} 页 / 共 ${totalPages} 页`;
+
+        prevBtn.disabled = meta.page <= 1;
+        nextBtn.disabled = meta.page >= totalPages || meta.total === 0;
+        currentPage = meta.page;
+    }
+
+    function displayError(message) {
+        // ... (保持不变) ...
+        const errorElement = document.getElementById('errorMessage');
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+    }
+
+    // ==================== 按 ID 查询功能 (保持不变) ====================
+    async function searchById() {
+        // ... (保持不变) ...
+        const patentId = document.getElementById('patentId').value;
+        const resultDiv = document.getElementById('singleResult');
+
+        if (!patentId) {
+            resultDiv.innerHTML = `<span class="error">请输入一个专利 ID。</span>`;
+            resultDiv.style.display = 'block';
+            return;
+        }
+
+        const url = `${BASE_URL}/${patentId}`;
+        resultDiv.innerHTML = '正在查询...';
+        resultDiv.style.display = 'block';
+
+        try {
+            const response = await fetch(url);
+            const result = await response.json();
+
+            if (response.status === 404) {
+                 resultDiv.innerHTML = `<span class="error">错误: ${result.message} (ID: ${patentId})</span>`;
+            } else if (result.code === 0) {
+                const patent = result.data;
+                resultDiv.innerHTML = `
+                    <strong>查询成功 (ID: ${patent.id})</strong><br>
+                    <strong>标题:</strong> ${patent.title || 'N/A'}<br>
+                    <strong>公告号:</strong> ${patent.publication_number || 'N/A'}<br>
+                    <strong>摘要:</strong> ${patent.abstract ? patent.abstract.substring(0, 150) + '...' : 'N/A'}
+                `;
+            } else {
+                resultDiv.innerHTML = `<span class="error">API 错误: ${result.message}</span>`;
+            }
+        } catch (error) {
+            resultDiv.innerHTML = `<span class="error">网络请求失败: ${error.message}</span>`;
+        }
+    }
+
+
+    // ==================== 排序功能 (保持不变) ====================
+    function handleSort(event) {
+        // ... (保持不变) ...
+        const th = event.target.closest('th');
+        if (!th || !th.dataset.sortBy) return;
+
+        const sortBy = th.dataset.sortBy;
+
+        if (sortBy === currentSortBy) {
+            currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSortBy = sortBy;
+            currentSortDir = 'desc';
+        }
+
+        currentPage = 1;
+        fetchAndRenderData();
+    }
+
+    function updateSortIndicators() {
+        // ... (保持不变) ...
+        document.querySelectorAll('#patentTable thead th[data-sort-by]').forEach(th => {
+            th.textContent = th.textContent.replace(/ [▲▼]$/, '');
+
+            if (th.dataset.sortBy === currentSortBy) {
+                th.textContent += currentSortDir === 'asc' ? ' ▲' : ' ▼';
+            }
+        });
+    }
+
+    // ==================== 增 (Create) / 改 (Update) 模态框逻辑 ====================
+
+    const modal = document.getElementById('patentModal');
+
+    function openModalForCreate() {
+        document.getElementById('modalTitle').textContent = '新增专利';
+        document.getElementById('formMethod').value = 'POST';
+        document.getElementById('patent_id').value = '';
+        document.getElementById('patentForm').reset(); // 清空表单
+        modal.style.display = 'flex';
+    }
+
+    async function openModalForUpdate(id) {
+        const url = `${BASE_URL}/${id}`;
+        try {
+            const response = await fetch(url);
+            const result = await response.json();
+
+            if (result.code === 0) {
+                const patent = result.data;
+                document.getElementById('modalTitle').textContent = `编辑专利 (ID: ${id})`;
+                document.getElementById('formMethod').value = 'PUT'; // 使用PUT进行完全更新
+                document.getElementById('patent_id').value = patent.id;
+
+                // 填充表单数据 (只填充模态框中的字段)
+                document.getElementById('modal_publication_number').value = patent.publication_number || '';
+                document.getElementById('modal_title').value = patent.title || '';
+                document.getElementById('modal_abstract').value = patent.abstract || '';
+                document.getElementById('modal_current_applicant').value = patent.current_applicant || '';
+                document.getElementById('modal_region').value = patent.region || '';
+
+                // 授权日期的处理：API返回的可能是'YYYY-MM-DD'，可以直接赋值给input[type=date]
+                document.getElementById('modal_grant_date').value = patent.grant_date || '';
+
+                modal.style.display = 'flex';
+            } else {
+                alert(`加载专利数据失败: ${result.message}`);
+            }
+        } catch (error) {
+            alert(`网络请求失败: ${error.message}`);
+        }
+    }
+
+    function closeModal() {
+        modal.style.display = 'none';
+        document.getElementById('patentForm').reset();
+    }
+
+    async function submitModalForm() {
+        const method = document.getElementById('formMethod').value;
+        const patentId = document.getElementById('patent_id').value;
+        const form = document.getElementById('patentForm');
+
+        // 简单表单验证
+        if (!form.reportValidity()) {
+            return;
+        }
+
+        // 收集表单数据
+        const formData = new FormData(form);
+        const data = {};
+        for (let [key, value] of formData.entries()) {
+            if (key !== 'id' && key !== 'formMethod') { // 排除隐藏字段
+                // 确保空字符串传null，或根据后端需求调整
+                data[key] = value === '' ? null : value;
+            }
+        }
+
+        const url = method === 'POST' ? BASE_URL : `${BASE_URL}/${patentId}`;
+
+        // 确保 date 字段如果为空则为 null (后端需要)
+        if (data.grant_date === "") data.grant_date = null;
+
+        try {
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.code === 0) {
+                alert(`${method === 'POST' ? '新增' : '更新'}成功!`);
+                closeModal();
+                fetchAndRenderData(); // 刷新列表
+            } else {
+                alert(`操作失败: ${result.message} (Code: ${result.code})`);
+            }
+        } catch (error) {
+            alert(`网络请求失败: ${error.message}`);
+        }
+    }
+
+    // ==================== 删 (Delete) 逻辑 ====================
+
+    async function deletePatent(id, pubNum) {
+        if (!confirm(`确定要删除专利 [${pubNum}] (ID: ${id}) 吗？`)) {
+            return;
+        }
+
+        const url = `${BASE_URL}/${id}`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'DELETE'
+            });
+            const result = await response.json();
+
+            if (response.status === 200 && result.code === 0) {
+                alert(`专利 (ID: ${id}) 删除成功!`);
+                fetchAndRenderData(); // 刷新列表
+            } else if (response.status === 404) {
+                 alert(`删除失败: 专利未找到。`);
+            } else {
+                alert(`删除失败: ${result.message} (Code: ${result.code})`);
+            }
+
+        } catch (error) {
+            alert(`网络请求失败: ${error.message}`);
+        }
+    }
+
+    // ==================== 交互函数 (列表) ====================
+    function searchData() {
+        currentPage = 1;
+        fetchAndRenderData();
+    }
+
+    function changePage(delta) {
+        currentPage += delta;
+        fetchAndRenderData();
+    }
+
+    // ==================== 页面初始化 ====================
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelector('#patentTable thead').addEventListener('click', handleSort);
+        fetchAndRenderData();
+    });
+</script>
+</div>
+</body>
+</html>

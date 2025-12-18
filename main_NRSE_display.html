@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NRSE 隐私计算演示平台</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .card { border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .nav-tabs .nav-link.active { background-color: #fff; border-bottom-color: #fff; font-weight: bold; color: #0d6efd; }
+        .stat-card { background: white; border-radius: 8px; padding: 15px; border-left: 4px solid #0d6efd; }
+        .badge-privacy-high { background-color: #198754; }
+        .badge-privacy-medium { background-color: #ffc107; color: #000; }
+        .badge-privacy-low { background-color: #dc3545; }
+        .table-responsive { max-height: 600px; overflow-y: auto; }
+        thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+        .histogram-bar { height: 20px; background-color: #0d6efd; border-radius: 3px; transition: width 0.5s; }
+    </style>
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+    <div class="container">
+        <a class="navbar-brand" href="#"><i class="fas fa-shield-alt me-2"></i>NRSE 隐私保护 API 演示</a>
+        <div class="d-flex align-items-center text-light">
+            <span id="api-status" class="badge bg-secondary me-2">检查连接中...</span>
+            <span id="timer"></span>
+        </div>
+    </div>
+</nav>
+
+<div class="container">
+    <div class="row">
+        <!-- 左侧控制面板 -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header bg-white">
+                    <ul class="nav nav-tabs card-header-tabs" id="privacyTabs" role="tablist">
+                        <li class="nav-item">
+                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-masking">数据脱敏</button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-kanon">K-匿名</button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-dp">差分隐私</button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-query">DP查询</button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content">
+                        
+                        <!-- 1. 数据脱敏控制 -->
+                        <div class="tab-pane fade show active" id="tab-masking">
+                            <h6 class="border-bottom pb-2">配置脱敏规则</h6>
+                            <form id="form-masking">
+                                <div class="mb-3">
+                                    <label class="form-label small text-muted">选择字段与脱敏类型</label>
+                                    <div id="masking-fields-container">
+                                        <!-- 动态生成 -->
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-2" onclick="addMaskingRule()">
+                                        <i class="fas fa-plus"></i> 添加规则
+                                    </button>
+                                </div>
+                                <hr>
+                                <div class="mb-3">
+                                    <label class="form-label">通用过滤 (可选)</label>
+                                    <div class="input-group input-group-sm">
+                                        <select class="form-select" id="masking-filter-field">
+                                            <option value="">选择过滤字段</option>
+                                            <option value="headquarters">总部所在地</option>
+                                            <option value="chain_stage">产业链环节</option>
+                                            <option value="sensitivity_level">敏感等级</option>
+                                        </select>
+                                        <input type="text" class="form-control" id="masking-filter-value" placeholder="值 (如: 北京)">
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">限制条数</label>
+                                    <input type="number" class="form-control" id="masking-limit" value="20" min="1" max="100">
+                                </div>
+                                <button type="button" class="btn btn-primary w-100" onclick="submitMasking()">
+                                    执行脱敏处理
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- 2. K-匿名控制 -->
+                        <div class="tab-pane fade" id="tab-kanon">
+                            <h6 class="border-bottom pb-2">K-Anonymity 参数</h6>
+                            <form id="form-kanon">
+                                <div class="mb-3">
+                                    <label class="form-label">K 值 (最小组大小) <span id="k-val-display" class="badge bg-info">5</span></label>
+                                    <input type="range" class="form-range" id="k-value" min="2" max="50" value="5" oninput="document.getElementById('k-val-display').innerText=this.value">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label small text-muted">准标识符 (Quasi-Identifiers)</label>
+                                    <div class="card p-2 bg-light" style="max-height: 150px; overflow-y: auto;">
+                                        <div class="form-check">
+                                            <input class="form-check-input qi-check" type="checkbox" value="headquarters" checked>
+                                            <label class="form-check-label">总部所在地</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input qi-check" type="checkbox" value="chain_stage" checked>
+                                            <label class="form-check-label">产业链环节</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input qi-check" type="checkbox" value="domestic_market_share">
+                                            <label class="form-check-label">市场份额</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input qi-check" type="checkbox" value="r_and_d_ratio">
+                                            <label class="form-check-label">研发投入占比</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label small text-muted">敏感属性 (不泛化)</label>
+                                    <select class="form-select" id="kanon-sensitive" multiple size="3">
+                                        <option value="revenue_2023" selected>2023年营收</option>
+                                        <option value="core_customers">核心客户</option>
+                                        <option value="key_technologies">关键技术</option>
+                                    </select>
+                                </div>
+                                <button type="button" class="btn btn-success w-100" onclick="submitKAnon()">
+                                    生成 K-匿名数据集
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- 3. 差分隐私控制 -->
+                        <div class="tab-pane fade" id="tab-dp">
+                            <h6 class="border-bottom pb-2">差分隐私 (DP) 参数</h6>
+                            <form id="form-dp">
+                                <div class="mb-3">
+                                    <label class="form-label">隐私预算 (ε) <span id="epsilon-display" class="badge bg-warning text-dark">1.0</span></label>
+                                    <input type="range" class="form-range" id="dp-epsilon" min="0.1" max="10.0" step="0.1" value="1.0" oninput="document.getElementById('epsilon-display').innerText=this.value">
+                                    <div class="form-text small">ε 越小，隐私保护越强，数据噪声越大。</div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">噪声机制</label>
+                                    <select class="form-select" id="dp-mechanism">
+                                        <option value="laplace">拉普拉斯 (Laplace)</option>
+                                        <option value="gaussian">高斯 (Gaussian)</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label small text-muted">数值字段选择</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input dp-field" type="checkbox" value="revenue_2023" checked>
+                                        <label class="form-check-label">营收 (revenue_2023)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input dp-field" type="checkbox" value="domestic_market_share" checked>
+                                        <label class="form-check-label">市场份额 (market_share)</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input dp-field" type="checkbox" value="r_and_d_ratio">
+                                        <label class="form-check-label">研发占比 (r_and_d_ratio)</label>
+                                    </div>
+                                </div>
+                                <button type="button" class="btn btn-warning w-100" onclick="submitDP()">
+                                    应用差分隐私
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- 4. DP 查询控制 -->
+                        <div class="tab-pane fade" id="tab-query">
+                            <h6 class="border-bottom pb-2">统计查询 (DP Query)</h6>
+                            <form id="form-query">
+                                <div class="mb-3">
+                                    <label class="form-label">查询类型</label>
+                                    <select class="form-select" id="query-type" onchange="toggleQueryFields()">
+                                        <option value="count">计数 (Count)</option>
+                                        <option value="sum">求和 (Sum)</option>
+                                        <option value="avg">平均值 (Avg)</option>
+                                        <option value="histogram">直方图分布 (Histogram)</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3" id="query-field-group" style="display:none;">
+                                    <label class="form-label">目标字段</label>
+                                    <select class="form-select" id="query-field">
+                                        <option value="revenue_2023">营收</option>
+                                        <option value="domestic_market_share">市场份额</option>
+                                        <option value="r_and_d_ratio">研发占比</option>
+                                        <option value="chain_stage">产业链环节 (仅限直方图)</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">过滤条件 (可选)</label>
+                                    <div class="row g-2">
+                                        <div class="col-5">
+                                            <input type="text" class="form-control form-control-sm" id="query-filter-key" placeholder="字段名">
+                                        </div>
+                                        <div class="col-7">
+                                            <input type="text" class="form-control form-control-sm" id="query-filter-val" placeholder="值">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">隐私预算 (ε)</label>
+                                    <input type="number" class="form-control" id="query-epsilon" value="1.0" step="0.1" min="0.1">
+                                </div>
+                                <button type="button" class="btn btn-info text-white w-100" onclick="submitQuery()">
+                                    执行查询
+                                </button>
+                            </form>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧结果展示 -->
+        <div class="col-lg-8">
+            <!-- 统计栏 -->
+            <div class="row mb-3" id="stats-panel" style="display:none;">
+                <div class="col-md-4">
+                    <div class="stat-card border-primary">
+                        <small class="text-muted">处理时间</small>
+                        <h4 class="mb-0" id="stat-time">-</h4>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-card border-success">
+                        <small class="text-muted">隐私等级</small>
+                        <h4 class="mb-0" id="stat-level">-</h4>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-card border-info">
+                        <small class="text-muted">数据效用/保留率</small>
+                        <h4 class="mb-0" id="stat-utility">-</h4>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数据表格区域 -->
+            <div class="card">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0 text-secondary" id="result-title">等待操作...</h5>
+                    <span class="badge bg-light text-dark border" id="record-count">0 条记录</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-striped mb-0 text-nowrap" id="data-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="text-center p-4 text-muted">请在左侧配置并执行操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <!-- 查询结果专用区域 -->
+                    <div id="query-result-area" class="p-4" style="display:none;">
+                        <!-- JS 填充 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 用于添加脱敏规则的模板数据 -->
+<script>
+    const NRSE_FIELDS = {
+        'enterprise_name': '企业名称',
+        'enterprise_id': '企业ID',
+        'core_customers': '核心客户',
+    };
+
+    const MASK_TYPES = {
+        'company_name': '企业名称脱敏',
+        'client_list': '核心客户脱敏',
+        'hash_id': 'ID脱敏'
+    };
+</script>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    // 配置 Axios
+    const api = axios.create({
+        baseURL: 'http://127.0.0.1:5000/api/v1/nrse', // 根据实际部署调整
+        timeout: 10000
+    });
+
+    // 页面加载初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        checkHealth();
+        addMaskingRule('enterprise_name', 'company_name'); // 默认添加一条
+        addMaskingRule('enterprise_id', 'hash_id');
+    });
+
+    // 1. 健康检查
+    async function checkHealth() {
+        const statusEl = document.getElementById('api-status');
+        try {
+            const res = await api.get('/health');
+            if (res.data.status === 'healthy') {
+                statusEl.className = 'badge bg-success me-2';
+                statusEl.textContent = '服务在线';
+            }
+        } catch (e) {
+            statusEl.className = 'badge bg-danger me-2';
+            statusEl.textContent = '服务离线';
+            console.error(e);
+        }
+    }
+
+    // ================== UI 辅助函数 ==================
+
+    // 动态添加脱敏规则行
+    function addMaskingRule(defaultField = '', defaultType = 'company_name') {
+        const container = document.getElementById('masking-fields-container');
+        const row = document.createElement('div');
+        row.className = 'input-group input-group-sm mb-2';
+
+        // 字段选择
+        let fieldOptions = '';
+        for (const [key, label] of Object.entries(NRSE_FIELDS)) {
+            fieldOptions += `<option value="${key}" ${key === defaultField ? 'selected' : ''}>${label}</option>`;
+        }
+
+        // 类型选择
+        let typeOptions = '';
+        for (const [key, label] of Object.entries(MASK_TYPES)) {
+            typeOptions += `<option value="${key}" ${key === defaultType ? 'selected' : ''}>${label}</option>`;
+        }
+
+        row.innerHTML = `
+            <select class="form-select masking-field-select">${fieldOptions}</select>
+            <select class="form-select masking-type-select" style="max-width: 120px;">${typeOptions}</select>
+            <button class="btn btn-outline-danger" type="button" onclick="this.parentElement.remove()">×</button>
+        `;
+        container.appendChild(row);
+    }
+
+    // 切换查询字段显示
+    function toggleQueryFields() {
+        const type = document.getElementById('query-type').value;
+        const fieldGroup = document.getElementById('query-field-group');
+        if (type === 'count') {
+            fieldGroup.style.display = 'none';
+        } else {
+            fieldGroup.style.display = 'block';
+        }
+    }
+
+    // 渲染表格
+    function renderTable(data, headers = null) {
+        const tableHead = document.querySelector('#data-table thead');
+        const tableBody = document.querySelector('#data-table tbody');
+        const queryArea = document.getElementById('query-result-area');
+
+        document.getElementById('data-table').style.display = 'table';
+        queryArea.style.display = 'none';
+
+        if (!data || data.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="100" class="text-center p-3">无数据</td></tr>';
+            return;
+        }
+
+        // 自动提取表头
+        if (!headers) {
+            headers = Object.keys(data[0]);
+        }
+
+        // 渲染表头
+        let headHtml = '<tr>';
+        headers.forEach(h => {
+            headHtml += `<th scope="col">${h}</th>`;
+        });
+        headHtml += '</tr>';
+        tableHead.innerHTML = headHtml;
+
+        // 渲染内容
+        let bodyHtml = '';
+        data.forEach(row => {
+            bodyHtml += '<tr>';
+            headers.forEach(h => {
+                let val = row[h];
+                if (val === null) val = '-';
+                // 简单的截断长文本
+                if (typeof val === 'string' && val.length > 50) {
+                    val = `<span title="${val}">${val.substring(0, 50)}...</span>`;
+                }
+                bodyHtml += `<td>${val}</td>`;
+            });
+            bodyHtml += '</tr>';
+        });
+        tableBody.innerHTML = bodyHtml;
+
+        document.getElementById('record-count').innerText = `${data.length} 条记录`;
+    }
+
+    // 渲染统计信息
+    function renderStats(time, level, utility) {
+        document.getElementById('stats-panel').style.display = 'flex';
+        document.getElementById('stat-time').innerText = time || '-';
+
+        const levelEl = document.getElementById('stat-level');
+        levelEl.innerText = level || 'Unknown';
+        levelEl.className = 'mb-0'; // reset
+        if (level === 'high') levelEl.style.color = 'green';
+        else if (level === 'medium') levelEl.style.color = 'orange';
+        else levelEl.style.color = 'red';
+
+        document.getElementById('stat-utility').innerText = utility || '-';
+    }
+
+    // 通用错误处理
+    function handleError(e) {
+        alert(e.response?.data?.message || e.message || "发生未知错误");
+    }
+
+    // ================== API 交互逻辑 ==================
+
+    // 1. 提交数据脱敏
+    async function submitMasking() {
+        const fieldSelects = document.querySelectorAll('.masking-field-select');
+        const typeSelects = document.querySelectorAll('.masking-type-select');
+
+        const field_rules = {};
+        fieldSelects.forEach((el, index) => {
+            field_rules[el.value] = typeSelects[index].value;
+        });
+
+        const filterKey = document.getElementById('masking-filter-field').value;
+        const filterVal = document.getElementById('masking-filter-value').value;
+        const filters = filterKey && filterVal ? {[filterKey]: filterVal} : {};
+
+        const payload = {
+            filters: filters,
+            field_rules: field_rules,
+            limit: parseInt(document.getElementById('masking-limit').value)
+        };
+
+        document.getElementById('result-title').innerText = "数据脱敏结果";
+
+        try {
+            const res = await api.post('/privacy/masking', payload);
+            const { masked_records, statistics } = res.data.data;
+
+            renderTable(masked_records);
+            renderStats(
+                statistics.processing_time,
+                "N/A (Masking)",
+                `脱敏率: ${statistics.masking_rate}`
+            );
+        } catch (e) { handleError(e); }
+    }
+
+    // 2. 提交 K-匿名
+    async function submitKAnon() {
+        const k = parseInt(document.getElementById('k-value').value);
+
+        const qi_checks = document.querySelectorAll('.qi-check:checked');
+        const quasi_identifiers = Array.from(qi_checks).map(c => c.value);
+
+        const sensitiveSelect = document.getElementById('kanon-sensitive');
+        const sensitive_attributes = Array.from(sensitiveSelect.selectedOptions).map(o => o.value);
+
+        if (quasi_identifiers.length === 0) {
+            alert("请至少选择一个准标识符");
+            return;
+        }
+
+        const payload = {
+            k: k,
+            quasi_identifiers: quasi_identifiers,
+            sensitive_attributes: sensitive_attributes,
+            generalization_levels: {}, // 使用后端默认
+            filters: {},
+            limit: 50 // 演示限制
+        };
+
+        document.getElementById('result-title').innerText = `K-匿名结果 (K=${k})`;
+
+        try {
+            const res = await api.post('/privacy/k-anonymity', payload);
+            const { anonymized_records, statistics, privacy_assessment, processing_time } = res.data.data;
+
+            // 重新排列列，让 QI 在前面
+            const firstRow = anonymized_records[0];
+            const headers = [...quasi_identifiers, ...sensitive_attributes];
+            // 添加剩余字段
+            Object.keys(firstRow).forEach(k => {
+                if(!headers.includes(k)) headers.push(k);
+            });
+
+            renderTable(anonymized_records, headers);
+            renderStats(
+                processing_time,
+                privacy_assessment.privacy_level,  // 修正：直接访问字段名
+                `信息丢失: ${(statistics.information_loss * 100).toFixed(2)}%` // 建议：格式化百分比
+            );
+        } catch (e) { handleError(e); }
+    }
+
+    // 3. 提交差分隐私 (数据集)
+    async function submitDP() {
+        const epsilon = parseFloat(document.getElementById('dp-epsilon').value);
+        const mechanism = document.getElementById('dp-mechanism').value;
+
+        const fieldChecks = document.querySelectorAll('.dp-field:checked');
+        const numeric_fields = Array.from(fieldChecks).map(c => c.value);
+
+        if (numeric_fields.length === 0) {
+            alert("请至少选择一个数值字段");
+            return;
+        }
+
+        const payload = {
+            epsilon: epsilon,
+            mechanism: mechanism,
+            numeric_fields: numeric_fields,
+            filters: {},
+            limit: 50
+        };
+
+        document.getElementById('result-title').innerText = `差分隐私数据集 (ε=${epsilon})`;
+
+        try {
+            const res = await api.post('/privacy/differential-privacy', payload);
+            const { privatized_records, privacy_assessment, processing_time } = res.data.data;
+
+            // 让 DP 字段排在前面
+            const headers = [...numeric_fields, "enterprise_name", "id"]; // 简单排序
+
+            renderTable(privatized_records, headers);
+            renderStats(
+                processing_time,
+                privacy_assessment.privacy_level,
+                `可用性: ${privacy_assessment.data_utility}`
+            );
+        } catch (e) { handleError(e); }
+    }
+
+    // 4. 提交 DP 查询
+    async function submitQuery() {
+        const query_type = document.getElementById('query-type').value;
+        const field = document.getElementById('query-field').value;
+        const epsilon = parseFloat(document.getElementById('query-epsilon').value);
+
+        const fKey = document.getElementById('query-filter-key').value;
+        const fVal = document.getElementById('query-filter-val').value;
+        const filters = fKey && fVal ? {[fKey]: fVal} : {};
+
+        const payload = {
+            query_type: query_type,
+            field: query_type === 'count' ? null : field,
+            filters: filters,
+            epsilon: epsilon,
+            mechanism: 'laplace'
+        };
+
+        document.getElementById('result-title').innerText = "查询结果";
+
+        // 隐藏表格，显示查询结果区
+        document.getElementById('data-table').style.display = 'none';
+        document.getElementById('record-count').innerText = '-';
+        const queryArea = document.getElementById('query-result-area');
+        queryArea.style.display = 'block';
+        queryArea.innerHTML = '<div class="text-center"><div class="spinner-border text-primary"></div></div>';
+
+        // 隐藏 stats
+        document.getElementById('stats-panel').style.display = 'none';
+
+        try {
+            const res = await api.post('/privacy/dp-query', payload);
+            const data = res.data.data;
+
+            let html = `
+                <div class="text-center mb-4">
+                    <h2 class="display-4 text-primary">${query_type === 'histogram' ? '分布图' : data.noisy_result}</h2>
+                    <p class="text-muted">
+                        查询类型: <strong>${data.query_type.toUpperCase()}</strong> |
+                        噪声机制: ${data.mechanism} |
+                        ε: ${data.epsilon}
+                    </p>
+                </div>
+            `;
+
+            if (query_type === 'histogram') {
+                const hist = data.noisy_result; // 假设返回 { "bucket1": count, "bucket2": count }
+                // 找出最大值用于归一化
+                let maxVal = 0;
+                for(let k in hist) if(hist[k] > maxVal) maxVal = hist[k];
+
+                html += '<div class="v-stack gap-3">';
+                for (const [bucket, count] of Object.entries(hist)) {
+                    const width = Math.max((count / maxVal) * 100, 1); // 最小1%
+                    html += `
+                        <div class="row align-items-center mb-2">
+                            <div class="col-3 text-end small text-truncate">${bucket}</div>
+                            <div class="col-9">
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar" role="progressbar" style="width: ${width}%">
+                                        ${Math.round(count)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+            }
+
+            queryArea.innerHTML = html;
+
+        } catch (e) { 
+            queryArea.innerHTML = `<div class="alert alert-danger">${e.response?.data?.message || e.message}</div>`;
+        }
+    }
+</script>
+
+</body>
+</html>
